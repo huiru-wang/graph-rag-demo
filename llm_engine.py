@@ -281,6 +281,7 @@ Good Case:
 - Text: "John is a professor." Output: {{"triples": [{{"subject": "John", "relation": "IS_A", "object": "Professor"}}]}}
 - Text: "John is 30 years old." Output: {{"triples": []}}
 - Text: "John was happy today." Output: {{"triples": []}}
+- Text: "My name is Robin." Output: {{"triples": []}}
 
 Not Relationships:
 - (Person, IS, Sad)
