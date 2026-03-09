@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Graph Memory System - LLM & Kuzu & Chroma</title>
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
+    <!-- 引入 Cytoscape.js 用于图谱渲染 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.26.0/cytoscape.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #2563eb;
+            --bg-color: #f8fafc;
+            --panel-bg: #ffffff;
+            --border-color: #e2e8f0;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, system-ui, sans-serif;
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            background-color: var(--bg-color);
+            color: #1e293b;
+        }
+
+        /* 左侧控制面板 */
+        .sidebar {
+            width: 350px;
+            background: var(--panel-bg);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            box-shadow: 2px 0 5px rgba(0, 0, 0, 0.02);
+            z-index: 10;
+        }
+
+        .user-badge {
+            font-size: 12px;
+            background: #f1f5f9;
+            padding: 4px 12px;
+            border-radius: 20px;
+            color: #64748b;
+            margin-bottom: 20px;
+            display: inline-block;
+        }
+
+        h2 {
+            margin: 0 0 10px 0;
+            font-size: 1.2rem;
+        }
+
+        textarea {
+            width: 100%;
+            height: 120px;
+            padding: 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            resize: none;
+            font-size: 14px;
+            box-sizing: border-box;
+            margin-bottom: 10px;
+        }
+
+        button {
+            width: 100%;
+            padding: 10px;
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: opacity 0.2s;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* 事实列表区域 */
+        .facts-container {
+            margin-top: 30px;
+            flex-grow: 1;
+            overflow-y: auto;
+        }
+
+        .fact-item {
+            font-size: 13px;
+            padding: 10px;
+            background: #f8fafc;
+            border-left: 3px solid var(--primary-color);
+            margin-bottom: 8px;
+            border-radius: 4px;
+        }
+
+        /* 日志容器 */
+        .log-container {
+            margin-top: 20px;
+            flex-grow: 1;
+            overflow-y: auto;
+            max-height: 200px;
+        }
+
+        .log-item {
+            font-size: 12px;
+            padding: 5px 8px;
+            background: #f1f5f9;
+            border-radius: 4px;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+        }
+
+        .log-icon {
+            margin-right: 8px;
+            font-size: 10px;
+        }
+
+        /* 右侧图谱区域 */
+        .main-content {
+            flex-grow: 1;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #cy {
+            flex-grow: 1;
+            width: 100%;
+            background-color: white;
+        }
+
+        .loading-overlay {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            display: none;
+            align-items: center;
+            gap: 12px;
+            font-size: 18px;
+            z-index: 1000;
+        }
+
+        /* 日志弹窗样式 */
+        .log-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .log-modal-content {
+            background-color: white;
+            width: 60%;
+            max-height: 70%;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .log-modal-header {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 15px 20px;
+            font-weight: bold;
+            font-size: 16px;
+        }
+
+        .log-modal-body {
+            padding: 20px;
+            overflow-y: auto;
+            max-height: 400px;
+            flex-grow: 1;
+        }
+
+        .log-item {
+            font-size: 13px;
+            padding: 8px;
+            margin-bottom: 5px;
+            background-color: #f8fafc;
+            border-left: 3px solid var(--primary-color);
+            border-radius: 4px;
+            white-space: pre-wrap;
+            line-height: 1.4;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="sidebar">
+        <div id="userIdDisplay" class="user-badge">User: Loading...</div>
+        <h2>输入记忆</h2>
+        <p style="font-size: 13px; color: #64748b;">输入事实，大模型将自动提取实体、关系并更新向量记忆。</p>
+
+        <textarea id="inputText" placeholder="例如：小明在Google工作。"></textarea>
+        <button id="submitBtn" onclick="submitText()">同步到大脑</button>
+        <button id="askBtn" onclick="askLLM()" style="margin-top: 10px; background-color: #64748b;">向大模型提问</button>
+
+        <div class="facts-container">
+            <h3>事实记忆</h3>
+            <div id="factsList">
+                <p style="color: #94a3b8; font-size: 13px;">暂无提取的事实记忆</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div id="cy"></div>
+        <div id="loading" class="loading-overlay">
+            <span class="spinner"></span> 🧠 AI 正在思考并更新数据库...
+        </div>
+    </div>
+
+    <!-- 日志弹窗 -->
+    <div id="logModal" class="log-modal">
+        <div class="log-modal-content">
+            <div class="log-modal-header">执行日志</div>
+            <div id="logsList" class="log-modal-body">
+                <!-- 日志内容将动态插入到这里 -->
+            </div>
+        </div>
+    </div>
+
+    <!-- 聊天弹窗 -->
+    <div id="chatModal" class="log-modal">
+        <div class="log-modal-content" style="width: 70%;">
+            <div class="log-modal-header">
+                与大模型对话
+                <span id="closeChatModal" style="float: right; cursor: pointer; font-size: 20px; font-weight: bold;"
+                    onclick="closeChatModalFunc()">&times;</span>
+            </div>
+            <div id="chatBody" class="log-modal-body" style="display: flex; flex-direction: column; flex-grow: 1;">
+                <div id="chatMessages" style="flex-grow: 1; overflow-y: auto; margin-bottom: 15px;"></div>
+                <div style="display: flex;">
+                    <input type="text" id="chatInput" placeholder="请输入您的问题..."
+                        style="flex-grow: 1; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                    <button onclick="sendChatMessageFromChat()"
+                        style="margin-left: 10px; padding: 10px 15px;">发送</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 1. 初始化 User ID (固定在本地存储)
+        let userId = localStorage.getItem('graph_user_id');
+        if (!userId) {
+            userId = 'user_' + Math.random().toString(36).substr(2, 6);
+            localStorage.setItem('graph_user_id', userId);
+        }
+        document.getElementById('userIdDisplay').innerText = `User ID: ${userId}`;
+
+        // 2. 初始化 Cytoscape
+        let cy = cytoscape({
+            container: document.getElementById('cy'),
+            style: [
+                {
+                    selector: 'node',
+                    style: {
+                        'label': 'data(label)',
+                        'background-color': '#2563eb',
+                        'color': '#1e293b',
+                        'font-size': '12px',
+                        'text-valign': 'center',
+                        'text-halign': 'bottom',
+                        'width': 30,
+                        'height': 30
+                    }
+                },
+                {
+                    selector: 'edge',
+                    style: {
+                        'label': 'data(label)',
+                        'width': 2,
+                        'line-color': '#cbd5e1',
+                        'target-arrow-color': '#cbd5e1',
+                        'target-arrow-shape': 'triangle',
+                        'curve-style': 'bezier',
+                        'font-size': '10px',
+                        'text-rotation': 'autorotate',
+                        'text-margin-y': -10
+                    }
+                }
+            ],
+            layout: { name: 'cose' }
+        });
+
+        // 3. 刷新图谱数据
+        async function refreshData() {
+            try {
+                const res = await fetch(`/graph_data?user_id=${userId}`);
+                const elements = await res.json();
+
+                cy.elements().remove();
+                cy.add(elements);
+                cy.layout({ name: 'cose', animate: true }).run();
+
+                // 刷新事实列表 (这里假设后端有个接口返回事实，如果没有可以暂时清空或由 /process 返回)
+                updateFactsDisplay(elements.facts || []);
+            } catch (e) {
+                console.error("加载数据失败", e);
+            }
+        }
+
+        function updateFactsDisplay(facts) {
+            const list = document.getElementById('factsList');
+            if (facts.length === 0) {
+                list.innerHTML = '<p style="color: #94a3b8; font-size: 13px;">暂无提取的事实记忆</p>';
+                return;
+            }
+            list.innerHTML = facts.map(f => `<div class="fact-item">${f}</div>`).join('');
+        }
+
+        // 4. 提交文本处理
+        async function submitText() {
+            const text = document.getElementById('inputText').value.trim();
+            if (!text) return;
+
+            const btn = document.getElementById('submitBtn');
+            const loading = document.getElementById('loading');
+
+            btn.disabled = true;
+            loading.style.display = 'flex';
+
+            // 显示日志弹窗
+            const modal = document.getElementById('logModal');
+            const logsList = document.getElementById('logsList');
+            logsList.innerHTML = ''; // 清空之前的日志
+            modal.style.display = 'flex';
+
+            try {
+                // 使用 fetch 连接到 SSE 端点
+                const response = await fetch('/process_stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text, user_id: userId })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                while (true) {
+                    const { done, value } = await reader.read();
+
+                    if (done) break;
+
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = JSON.parse(line.substring(6));
+
+                            if (data.type === 'log') {
+                                // 添加日志项到弹窗
+                                const logItem = document.createElement('div');
+                                logItem.className = 'log-item';
+                                logItem.textContent = data.message;
+                                logsList.appendChild(logItem);
+
+                                // 滚动到底部
+                                logsList.scrollTop = logsList.scrollHeight;
+                            } else if (data.type === 'complete') {
+                                // 处理完成，刷新数据
+                                await refreshData();      // 刷新图谱数据
+                                await refreshMemories();   // 刷新事实记忆列表
+                                break;
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error("提交失败:", e);
+                alert("处理失败，请检查后端运行状态");
+            } finally {
+                // 清空输入框
+                document.getElementById('inputText').value = '';
+
+                // 关闭弹窗和加载提示
+                modal.style.display = 'none';
+                btn.disabled = false;
+                loading.style.display = 'none';
+            }
+        }
+
+        // 5. 刷新记忆列表
+        async function refreshMemories() {
+            try {
+                const res = await fetch(`/memories?user_id=${userId}&limit=30`);
+                const memories = await res.json();
+
+                const factsList = document.getElementById('factsList');
+                if (memories.length > 0) {
+                    factsList.innerHTML = memories.map(m =>
+                        `<div class="fact-item">${m.text} <small style="color: #94a3b8;">(${new Date(m.created_at).toLocaleString()})</small></div>`
+                    ).join('');
+                } else {
+                    factsList.innerHTML = '<p style="color: #94a3b8; font-size: 13px;">暂无提取的事实</p>';
+                }
+            } catch (e) {
+                console.error("加载记忆失败", e);
+            }
+        }
+
+        // 初始加载
+        window.onload = async function () {
+            await refreshData();  // 加载图谱数据
+            await refreshMemories();  // 加载记忆列表
+        };
+
+        // 向大模型提问功能
+        async function askLLM() {
+            // 获取输入框的值作为提问内容
+            const inputText = document.getElementById('inputText').value.trim();
+            
+            // 如果输入框为空，则提示用户输入
+            if (!inputText) {
+                alert('请输入您想问的问题');
+                return;
+            }
+            
+            const chatModal = document.getElementById('chatModal');
+            const chatMessages = document.getElementById('chatMessages');
+            chatMessages.innerHTML = '<p style="color: #94a3b8; font-size: 13px;">正在连接大模型...</p>';
+            chatModal.style.display = 'flex';
+            
+            try {
+                // 使用输入框的内容作为消息发送
+                // 调用后端API获取大模型回复
+                const response = await fetch('/chat_with_memory', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        message: inputText, 
+                        user_id: userId 
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                // 处理流式响应
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                
+                // 清空初始消息
+                chatMessages.innerHTML = '';
+                
+                // 添加用户消息
+                const userMessageDiv = document.createElement('div');
+                userMessageDiv.className = 'log-item';
+                userMessageDiv.style.marginBottom = '10px';
+                userMessageDiv.innerHTML = `<strong>您:</strong> ${inputText}`;
+                chatMessages.appendChild(userMessageDiv);
+                
+                // 添加助手消息容器
+                const assistantMessageDiv = document.createElement('div');
+                assistantMessageDiv.className = 'log-item';
+                assistantMessageDiv.style.marginBottom = '10px';
+                assistantMessageDiv.style.whiteSpace = 'pre-wrap';  // 添加此行以支持换行
+                assistantMessageDiv.innerHTML = '<strong>AI助手:</strong> ';
+                const contentSpan = document.createElement('span');
+                contentSpan.style.whiteSpace = 'pre-wrap';  // 添加此行以支持换行
+                assistantMessageDiv.appendChild(contentSpan);
+                chatMessages.appendChild(assistantMessageDiv);
+                
+                let fullResponse = '';
+                
+                while (true) {
+                    const { done, value } = await reader.read();
+                    
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = JSON.parse(line.substring(6));
+                            
+                            if (data.type === 'content') {
+                                fullResponse += data.content;
+                                contentSpan.textContent = fullResponse;
+                                chatMessages.scrollTop = chatMessages.scrollHeight;
+                            } else if (data.type === 'complete') {
+                                // 完成
+                                break;
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error("聊天请求失败:", e);
+                const errorMessageDiv = document.createElement('div');
+                errorMessageDiv.className = 'log-item';
+                errorMessageDiv.style.color = 'red';
+                errorMessageDiv.innerHTML = '<strong>AI助手:</strong> 请求失败，请重试';
+                chatMessages.appendChild(errorMessageDiv);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+        }
+
+        async function sendChatMessage() {
+            const inputElement = document.getElementById('chatInput');
+            const message = inputElement.value.trim();
+            if (!message) return;
+
+            const chatMessages = document.getElementById('chatMessages');
+            // 添加用户消息
+            const userMessageDiv = document.createElement('div');
+            userMessageDiv.className = 'log-item';
+            userMessageDiv.style.marginBottom = '10px';
+            userMessageDiv.innerHTML = `<strong>您:</strong> ${message}`;
+            chatMessages.appendChild(userMessageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            // 清空输入框
+            inputElement.value = '';
+
+            try {
+                // 调用后端API获取大模型回复
+                const response = await fetch('/chat_with_memory', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: message,
+                        user_id: userId
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                // 处理流式响应
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                // 添加助手消息容器
+                const assistantMessageDiv = document.createElement('div');
+                assistantMessageDiv.className = 'log-item';
+                assistantMessageDiv.style.marginBottom = '10px';
+                assistantMessageDiv.innerHTML = '<strong>AI助手:</strong> ';
+                const contentSpan = document.createElement('span');
+                assistantMessageDiv.appendChild(contentSpan);
+                chatMessages.appendChild(assistantMessageDiv);
+
+                let fullResponse = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+
+                    if (done) break;
+
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = JSON.parse(line.substring(6));
+
+                            if (data.type === 'content') {
+                                fullResponse += data.content;
+                                contentSpan.textContent = fullResponse;
+                                chatMessages.scrollTop = chatMessages.scrollHeight;
+                            } else if (data.type === 'complete') {
+                                // 完成
+                                break;
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error("聊天请求失败:", e);
+                const errorMessageDiv = document.createElement('div');
+                errorMessageDiv.className = 'log-item';
+                errorMessageDiv.style.color = 'red';
+                errorMessageDiv.innerHTML = '<strong>AI助手:</strong> 请求失败，请重试';
+                chatMessages.appendChild(errorMessageDiv);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+        }
+
+        // 监听回车键发送消息
+        document.getElementById('chatInput').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                sendChatMessage();
+            }
+        });
+
+        // 关闭聊天弹窗函数
+        function closeChatModalFunc() {
+            const chatModal = document.getElementById('chatModal');
+            chatModal.style.display = 'none';
+        }
+
+        // 从聊天窗口发送消息
+        async function sendChatMessageFromChat() {
+            const inputElement = document.getElementById('chatInput');
+            const message = inputElement.value.trim();
+            if (!message) return;
+
+            const chatMessages = document.getElementById('chatMessages');
+            // 添加用户消息
+            const userMessageDiv = document.createElement('div');
+            userMessageDiv.className = 'log-item';
+            userMessageDiv.style.marginBottom = '10px';
+            userMessageDiv.innerHTML = `<strong>您:</strong> ${message}`;
+            chatMessages.appendChild(userMessageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            // 清空输入框
+            inputElement.value = '';
+
+            try {
+                // 调用后端API获取大模型回复
+                const response = await fetch('/chat_with_memory', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: message,
+                        user_id: userId
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                // 处理流式响应
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                // 添加助手消息容器
+                const assistantMessageDiv = document.createElement('div');
+                assistantMessageDiv.className = 'log-item';
+                assistantMessageDiv.style.marginBottom = '10px';
+                assistantMessageDiv.style.whiteSpace = 'pre-wrap';  // 添加此行以支持换行
+                assistantMessageDiv.innerHTML = '<strong>AI助手:</strong> ';
+                const contentSpan = document.createElement('span');
+                contentSpan.style.whiteSpace = 'pre-wrap';  // 添加此行以支持换行
+                assistantMessageDiv.appendChild(contentSpan);
+                chatMessages.appendChild(assistantMessageDiv);
+
+                let fullResponse = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+
+                    if (done) break;
+
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = JSON.parse(line.substring(6));
+
+                            if (data.type === 'content') {
+                                fullResponse += data.content;
+                                contentSpan.textContent = fullResponse;
+                                chatMessages.scrollTop = chatMessages.scrollHeight;
+                            } else if (data.type === 'complete') {
+                                // 完成
+                                break;
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error("聊天请求失败:", e);
+                const errorMessageDiv = document.createElement('div');
+                errorMessageDiv.className = 'log-item';
+                errorMessageDiv.style.color = 'red';
+                errorMessageDiv.innerHTML = '<strong>AI助手:</strong> 请求失败，请重试';
+                chatMessages.appendChild(errorMessageDiv);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+        }
+
+        // 监听回车键发送消息
+        document.getElementById('chatInput').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                sendChatMessageFromChat();
+            }
+        });
+    </script>
+</body>
+
+</html>

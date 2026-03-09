@@ -1,0 +1,37 @@
+{
+    "timestamp": "2026-03-09T20:20:03.423710",
+    "user_id": "user_a015b9",
+    "model": "qwen3.5-flash",
+    "request": {
+        "messages": [
+            {
+                "role": "system",
+                "content": "你是一个智能助手。以下是关于当前用户的已知记忆，请结合这些记忆来回答用户的问题：\n---\n【事实记忆】\n1. USER's name is 小明\n2. USER's job title is Frontend Developer\n3. USER works at Alibaba\n\n\n---\n如果以上信息与问题无关，请忽略它们并正常回答用户问题。\n另外，请确保你的回答是中文的。"
+            },
+            {
+                "role": "user",
+                "content": "你好，请问有什么可以帮助你的？"
+            }
+        ]
+    },
+    "response": {
+        "content": "你好，小明！很高兴见到您。\n\n虽然是您先问了“能帮您什么”，但我是您的智能助手，随时准备为您提供支持才对。不过非常感谢您的问候！\n\n考虑到您是阿里的前端开发工程师，如果您在工作中有遇到代码优化、技术方案设计，或者其他需要查询资料的任务，我都可以协助您。请问今天有什么具体需要我协助的吗？",
+        "usage": {
+            "completion_tokens": 1552,
+            "prompt_tokens": 105,
+            "total_tokens": 1657,
+            "completion_tokens_details": {
+                "accepted_prediction_tokens": null,
+                "audio_tokens": null,
+                "reasoning_tokens": 1474,
+                "rejected_prediction_tokens": null,
+                "text_tokens": 1552
+            },
+            "prompt_tokens_details": {
+                "audio_tokens": null,
+                "cached_tokens": null,
+                "text_tokens": 105
+            }
+        }
+    }
+}
