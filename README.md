@@ -98,8 +98,10 @@ graph TD
     在项目根目录下创建一个 `.env` 文件，并填入你的大语言模型服务的 API 密钥和地址。
 
     ```.env
-    OPENAI_API_KEY="sk-your-api-key"
-    OPENAI_API_BASE="https://dashscope.aliyuncs.com/compatible-mode/v1"
+    cat <<EOF > .env
+    OPENAI_API_KEY=sk-549678f8ccee4b86994bbb741d0d9f12
+    OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+    EOF
     ```
 
 4.  **启动应用**

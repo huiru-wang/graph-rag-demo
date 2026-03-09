@@ -309,7 +309,7 @@ Language: Return the corresponding text based on the user's input language.
 """
 
 client = OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY", "sk-d9733c5f1f994def9494b6fbb55232ff"),
+    api_key=os.getenv("OPENAI_API_KEY"),
     base_url=os.getenv("OPENAI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
 )
 
